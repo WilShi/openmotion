@@ -489,12 +489,27 @@ export async function apply(ctx: any) {
   );
   registerEditingWorkspace(ctx);
   const studioActions = (sessionId: string) => ({
-    openStudio: () => {
+    openStudio: async () => {
       const key = "omd-session:" + sessionId;
-      const project =
-        localStorage.getItem(key) ||
-        localStorage.getItem(selectedKey) ||
-        "project";
+      // A project created by an Agent, an MCP tool or a template handoff never
+      // passes through this UI, so this session has no stored choice. The Studio's
+      // own active project is the truthful answer; the bundled demo project is only
+      // the last resort when even that cannot be read.
+      let project =
+        localStorage.getItem(key) || localStorage.getItem(selectedKey);
+      if (!project) {
+        try {
+          const response = await fetch(
+            "/openmotion-dsh/data/motion-api/projects",
+            { headers: { accept: "application/json" }, cache: "no-store" },
+          );
+          if (response.ok) {
+            const active = (await response.json())?.activeId;
+            if (typeof active === "string" && active) project = active;
+          }
+        } catch {}
+      }
+      project = project || "project";
       localStorage.setItem(key, project);
       ctx.sidebarRight.openTab("openmotion-studio", {
         params: localStorage.getItem("omd-session-page:" + sessionId) === "templates" ? { page: "templates" } : { projectId: project },
