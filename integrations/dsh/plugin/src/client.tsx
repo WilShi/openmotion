@@ -491,26 +491,32 @@ export async function apply(ctx: any) {
   const studioActions = (sessionId: string) => ({
     openStudio: async () => {
       const key = "omd-session:" + sessionId;
-      // A project created by an Agent, an MCP tool or a template handoff never
-      // passes through this UI, so this session has no stored choice. The Studio's
-      // own active project is the truthful answer; the bundled demo project is only
-      // the last resort when even that cannot be read.
-      let project =
-        localStorage.getItem(key) || localStorage.getItem(selectedKey);
-      if (!project) {
-        try {
-          const response = await fetch(
-            "/openmotion-dsh/data/motion-api/projects",
-            { headers: { accept: "application/json" }, cache: "no-store" },
-          );
-          if (response.ok) {
-            const active = (await response.json())?.activeId;
-            if (typeof active === "string" && active) project = active;
-          }
-        } catch {}
-      }
-      project = project || "project";
-      localStorage.setItem(key, project);
+      // A remembered pick goes stale: the Studio can switch projects at any time
+      // (store.selectProject rewrites activeId), and a project can be trashed. Read
+      // the list on every click and only trust an id that is still there.
+      let list: any = null;
+      try {
+        const response = await fetch(
+          "/openmotion-dsh/data/motion-api/projects",
+          { headers: { accept: "application/json" }, cache: "no-store" },
+        );
+        if (response.ok) list = await response.json();
+      } catch {}
+      const known = Array.isArray(list?.projects) ? list.projects : null;
+      const usable = (id: unknown): id is string =>
+        typeof id === "string" &&
+        id.length > 0 &&
+        (!known || known.some((project: any) => project?.id === id && !project.trashedAt));
+      // Both remembered picks go through the same check; the plugin-wide one is
+      // kept for users who chose a project in the workspace dashboard.
+      const stored = localStorage.getItem(key) || localStorage.getItem(selectedKey);
+      // Explicit picks stay first while they are valid; a stale one yields to the
+      // project the Studio actually has open. Nothing is written back: only
+      // openProject/choose know that a choice was explicit.
+      const project =
+        (usable(stored) ? stored : undefined) ||
+        (usable(list?.activeId) ? list.activeId : undefined) ||
+        "project";
       ctx.sidebarRight.openTab("openmotion-studio", {
         params: localStorage.getItem("omd-session-page:" + sessionId) === "templates" ? { page: "templates" } : { projectId: project },
       });
